@@ -2,8 +2,15 @@ import express from 'express';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import connectDB from './lib/db.js';
+
+// Import routes
 import authRoutes from './routes/auth.route.js';
 import userRoutes from './routes/user.route.js';
+import domainRoutes from './routes/domain.route.js';
+import technologyRoutes from './routes/technology.route.js';
+import tutorialRoutes from './routes/tutorial.route.js';
+import lessonRoutes from './routes/lesson.route.js';
+import tutorialLessonRoutes from './routes/tutorial.lesson.route.js';
 
 // Load environment variables
 dotenv.config();
@@ -44,6 +51,11 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/domains', domainRoutes);
+app.use('/api/v1/technologies', technologyRoutes);
+app.use('/api/v1/tutorials', tutorialRoutes);
+app.use('/api/v1/lessons', lessonRoutes);
+app.use('/api/v1/tutorials/:tutorialId/lessons', tutorialLessonRoutes);
 
 // Base route
 app.get('/', (req, res) => {
