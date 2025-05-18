@@ -115,6 +115,7 @@ export const updateDomain = async (req, res) => {
 // @desc    Delete domain
 // @route   DELETE /api/v1/domains/:id
 // @access  Private/Admin
+// Update this function in src/controllers/domain.controller.js
 export const deleteDomain = async (req, res) => {
   try {
     const { id } = req.params;
@@ -143,7 +144,10 @@ export const deleteDomain = async (req, res) => {
       });
     }
     
-    await domain.remove();
+    // Use deleteOne() instead of remove()
+    await Domain.deleteOne({ _id: id });
+    // OR you can use findByIdAndDelete
+    // await Domain.findByIdAndDelete(id);
     
     res.json({ message: 'Domain removed' });
   } catch (error) {

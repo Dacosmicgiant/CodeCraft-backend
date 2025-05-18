@@ -164,7 +164,8 @@ export const deleteTechnology = async (req, res) => {
       });
     }
     
-    await technology.remove();
+    // Replace remove() with deleteOne()
+    await Technology.deleteOne({ _id: id });
     
     res.json({ message: 'Technology removed' });
   } catch (error) {

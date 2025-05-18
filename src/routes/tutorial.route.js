@@ -10,11 +10,12 @@ import { protect, admin } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
-// Public routes
-router.get('/', getTutorials);
-router.get('/:id', getTutorialById);
+// Apply protect middleware to GET routes to check for authentication
+// This way, admin users can see unpublished content
+router.get('/', protect, getTutorials);
+router.get('/:id', protect, getTutorialById);
 
-// Admin routes
+// Admin-only routes
 router.post('/', protect, admin, createTutorial);
 router.put('/:id', protect, admin, updateTutorial);
 router.delete('/:id', protect, admin, deleteTutorial);

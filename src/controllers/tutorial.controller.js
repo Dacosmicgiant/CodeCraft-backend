@@ -29,7 +29,7 @@ export const createTutorial = async (req, res) => {
 
 // @desc    Get all tutorials
 // @route   GET /api/v1/tutorials
-// @access  Public
+// @access  Public with auth check
 export const getTutorials = async (req, res) => {
   try {
     const { domain, technology, difficulty, search, page = 1, limit = 10, sort = '-createdAt' } = req.query;
@@ -50,7 +50,8 @@ export const getTutorials = async (req, res) => {
       query.$or = [
         { title: { $regex: search, $options: 'i' } },
         { description: { $regex: search, $options: 'i' } },
-        { tags: { $in: [new RegExp(search, 'i')] } }
+        // Fix the tags search to use $regex instead of $in with RegExp
+        { tags: { $regex: search, $options: 'i' } }
       ];
     }
     
@@ -178,8 +179,8 @@ export const deleteTutorial = async (req, res) => {
     // Delete associated lessons
     await Lesson.deleteMany({ tutorial: id });
     
-    // Delete tutorial
-    await tutorial.remove();
+    // Delete tutorial - replace remove() with deleteOne()
+    await Tutorial.deleteOne({ _id: id });
     
     res.json({ message: 'Tutorial removed' });
   } catch (error) {

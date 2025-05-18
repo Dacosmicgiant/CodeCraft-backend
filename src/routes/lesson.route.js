@@ -11,8 +11,8 @@ import { protect, admin } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
-// Public routes
-router.get('/:id', getLessonById);
+// Add protect middleware to GET route to check for authentication
+router.get('/:id', protect, getLessonById);
 
 // Admin routes
 router.put('/:id', protect, admin, updateLesson);

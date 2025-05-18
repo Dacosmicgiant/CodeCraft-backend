@@ -7,8 +7,8 @@ import { protect, admin } from '../middleware/auth.middleware.js';
 
 const router = express.Router({ mergeParams: true });
 
-// Public routes
-router.get('/', getLessonsByTutorial);
+// Add protect middleware to GET route to check for authentication
+router.get('/', protect, getLessonsByTutorial);
 
 // Admin routes
 router.post('/', protect, admin, createLesson);
