@@ -1,3 +1,4 @@
+// src/routes/lesson.route.js
 import express from 'express';
 import {
   createLesson,
@@ -5,19 +6,21 @@ import {
   getLessonById,
   updateLesson,
   deleteLesson,
-  updateLessonContent
+  updateLessonContent,
+  duplicateLesson,
+  reorderLessons
 } from '../controllers/lesson.controller.js';
 import { protect, admin } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
-// Add protect middleware to GET route to check for authentication
+// Public routes (with authentication check for access control)
 router.get('/:id', protect, getLessonById);
 
-// Admin routes
+// Admin-only routes
 router.put('/:id', protect, admin, updateLesson);
 router.delete('/:id', protect, admin, deleteLesson);
 router.put('/:id/content', protect, admin, updateLessonContent);
+router.post('/:id/duplicate', protect, admin, duplicateLesson);
 
-// Export router
 export default router;

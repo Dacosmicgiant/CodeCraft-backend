@@ -1,16 +1,19 @@
+// src/routes/tutorial.lesson.route.js
 import express from 'express';
 import {
   createLesson,
-  getLessonsByTutorial
+  getLessonsByTutorial,
+  reorderLessons
 } from '../controllers/lesson.controller.js';
 import { protect, admin } from '../middleware/auth.middleware.js';
 
 const router = express.Router({ mergeParams: true });
 
-// Add protect middleware to GET route to check for authentication
+// Public routes (with authentication check for access control)
 router.get('/', protect, getLessonsByTutorial);
 
-// Admin routes
+// Admin-only routes
 router.post('/', protect, admin, createLesson);
+router.put('/reorder', protect, admin, reorderLessons);
 
 export default router;
