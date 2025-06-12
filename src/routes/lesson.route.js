@@ -2,6 +2,7 @@
 import express from 'express';
 import {
   createLesson,
+  getAllLessons,
   getLessonsByTutorial,
   getLessonById,
   updateLesson,
@@ -13,6 +14,9 @@ import {
 import { protect, admin } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
+
+// Admin route to get all lessons across all tutorials
+router.get('/', protect, admin, getAllLessons);
 
 // Public routes (with authentication check for access control)
 router.get('/:id', protect, getLessonById);

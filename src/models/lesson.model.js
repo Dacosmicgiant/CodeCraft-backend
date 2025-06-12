@@ -1,61 +1,29 @@
-// src/models/lesson.model.js
+// src/models/lesson.model.js - Complete Updated Version
 import mongoose from 'mongoose';
 import slugify from 'slugify';
 
-// Content block schema with enhanced validation
-const contentBlockSchema = new mongoose.Schema({
+// EditorJS block schema - flexible to handle any block type
+const editorJSBlockSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    required: false // EditorJS sometimes doesn't include IDs for all blocks
+  },
   type: {
     type: String,
-    enum: ['text', 'code', 'image', 'video', 'quiz', 'embed', 'delimiter', 'header', 'list'],
-    required: true
+    required: [true, 'Block type is required']
   },
   data: {
-    // Text block
-    text: String,
-    
-    // Code block
-    code: String,
-    language: String,
-    
-    // Image block
-    url: String,
-    alt: String,
-    caption: String,
-    
-    // Video block
-    source: String,
-    poster: String,
-    
-    // Quiz block
-    question: String,
-    options: [String],
-    correctAnswer: Number,
-    explanation: String,
-    
-    // Header block
-    level: {
-      type: Number,
-      min: 1,
-      max: 6
-    },
-    
-    // List block
-    style: {
-      type: String,
-      enum: ['ordered', 'unordered']
-    },
-    items: [String],
-    
-    // Embed block
-    service: String,
-    embed: String,
-    width: Number,
-    height: Number,
-    
-    // Generic data for custom blocks
-    content: mongoose.Schema.Types.Mixed
+    type: mongoose.Schema.Types.Mixed, // Allow any structure for block data
+    required: [true, 'Block data is required']
+  },
+  tunes: {
+    type: mongoose.Schema.Types.Mixed, // For block tunes/settings
+    required: false
   }
-}, { _id: true });
+}, { 
+  _id: false, // Don't create MongoDB _id for blocks
+  strict: false // Allow additional fields that might be added by EditorJS
+});
 
 const lessonSchema = new mongoose.Schema({
   title: {
@@ -80,14 +48,21 @@ const lessonSchema = new mongoose.Schema({
     required: [true, 'Tutorial is required'],
     index: true
   },
+  // EditorJS content structure
   content: {
     time: {
       type: Number,
+      required: true,
       default: Date.now
     },
-    blocks: [contentBlockSchema],
+    blocks: {
+      type: [editorJSBlockSchema],
+      required: true,
+      default: []
+    },
     version: {
       type: String,
+      required: true,
       default: "2.28.2"
     }
   },
@@ -123,7 +98,7 @@ const lessonSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  // Content flags
+  // Content flags - computed from content analysis
   difficulty: {
     type: String,
     enum: ['beginner', 'intermediate', 'advanced'],
@@ -138,6 +113,10 @@ const lessonSchema = new mongoose.Schema({
     default: false
   },
   hasCode: {
+    type: Boolean,
+    default: false
+  },
+  hasImages: {
     type: Boolean,
     default: false
   }
@@ -157,20 +136,62 @@ lessonSchema.index({ createdAt: -1 });
 
 // Virtual for estimated reading time based on content
 lessonSchema.virtual('estimatedReadingTime').get(function() {
-  if (!this.content || !this.content.blocks) return this.duration;
+  // Defensive check for content existence
+  if (!this.content || !this.content.blocks || !Array.isArray(this.content.blocks)) {
+    return this.duration || 1;
+  }
   
   let wordCount = 0;
-  this.content.blocks.forEach(block => {
-    if (block.type === 'text' && block.data.text) {
-      wordCount += block.data.text.split(/\s+/).length;
-    } else if (block.type === 'header' && block.data.text) {
-      wordCount += block.data.text.split(/\s+/).length;
-    } else if (block.type === 'list' && block.data.items) {
-      block.data.items.forEach(item => {
-        wordCount += item.split(/\s+/).length;
-      });
-    }
-  });
+  
+  try {
+    this.content.blocks.forEach(block => {
+      // Defensive checks for block structure
+      if (!block || typeof block !== 'object') return;
+      if (!block.type || !block.data) return;
+      
+      switch (block.type) {
+        case 'paragraph':
+        case 'header':
+          if (block.data.text && typeof block.data.text === 'string') {
+            wordCount += block.data.text.replace(/<[^>]*>/g, '').split(/\s+/).filter(word => word.length > 0).length;
+          }
+          break;
+        case 'list':
+          if (Array.isArray(block.data.items)) {
+            block.data.items.forEach(item => {
+              if (typeof item === 'string') {
+                wordCount += item.replace(/<[^>]*>/g, '').split(/\s+/).filter(word => word.length > 0).length;
+              }
+            });
+          }
+          break;
+        case 'quote':
+          if (block.data.text && typeof block.data.text === 'string') {
+            wordCount += block.data.text.replace(/<[^>]*>/g, '').split(/\s+/).filter(word => word.length > 0).length;
+          }
+          if (block.data.caption && typeof block.data.caption === 'string') {
+            wordCount += block.data.caption.replace(/<[^>]*>/g, '').split(/\s+/).filter(word => word.length > 0).length;
+          }
+          break;
+        case 'table':
+          if (Array.isArray(block.data.content)) {
+            block.data.content.forEach(row => {
+              if (Array.isArray(row)) {
+                row.forEach(cell => {
+                  if (typeof cell === 'string') {
+                    wordCount += cell.replace(/<[^>]*>/g, '').split(/\s+/).filter(word => word.length > 0).length;
+                  }
+                });
+              }
+            });
+          }
+          break;
+      }
+    });
+  } catch (error) {
+    console.warn('Error calculating reading time for lesson:', this._id, error);
+    return this.duration || 1;
+  }
   
   // Average reading speed: 200 words per minute
   const readingTime = Math.ceil(wordCount / 200);
@@ -179,76 +200,134 @@ lessonSchema.virtual('estimatedReadingTime').get(function() {
 
 // Virtual for content summary
 lessonSchema.virtual('contentSummary').get(function() {
-  if (!this.content || !this.content.blocks) return {};
-  
+  // Defensive initialization
   const summary = {
-    totalBlocks: this.content.blocks.length,
-    textBlocks: 0,
-    codeBlocks: 0,
-    imageBlocks: 0,
-    videoBlocks: 0,
-    quizBlocks: 0,
-    hasInteractiveContent: false
+    totalBlocks: 0,
+    blockTypes: {},
+    hasInteractiveContent: false,
+    wordCount: 0
   };
   
-  this.content.blocks.forEach(block => {
-    switch (block.type) {
-      case 'text':
-      case 'header':
-        summary.textBlocks++;
-        break;
-      case 'code':
-        summary.codeBlocks++;
-        this.hasCode = true;
-        break;
-      case 'image':
-        summary.imageBlocks++;
-        break;
-      case 'video':
-        summary.videoBlocks++;
-        this.hasVideo = true;
-        break;
-      case 'quiz':
-        summary.quizBlocks++;
-        this.hasQuiz = true;
+  // Defensive checks
+  if (!this.content || !this.content.blocks || !Array.isArray(this.content.blocks)) {
+    return summary;
+  }
+  
+  try {
+    summary.totalBlocks = this.content.blocks.length;
+    
+    this.content.blocks.forEach(block => {
+      // Defensive block checks
+      if (!block || typeof block !== 'object' || !block.type) {
+        return; // Skip invalid blocks
+      }
+      
+      // Count block types
+      summary.blockTypes[block.type] = (summary.blockTypes[block.type] || 0) + 1;
+      
+      // Check for interactive content
+      if (['quiz', 'checklist', 'poll', 'embed'].includes(block.type)) {
         summary.hasInteractiveContent = true;
-        break;
-    }
-  });
+      }
+      
+      // Count words for text-based blocks
+      let blockText = '';
+      
+      try {
+        switch (block.type) {
+          case 'paragraph':
+          case 'header':
+            blockText = block.data?.text || '';
+            break;
+          case 'list':
+            if (Array.isArray(block.data?.items)) {
+              blockText = block.data.items.filter(item => typeof item === 'string').join(' ');
+            }
+            break;
+          case 'quote':
+            blockText = (block.data?.text || '') + ' ' + (block.data?.caption || '');
+            break;
+        }
+        
+        if (blockText && typeof blockText === 'string') {
+          summary.wordCount += blockText.replace(/<[^>]*>/g, '').split(/\s+/).filter(word => word.length > 0).length;
+        }
+      } catch (blockError) {
+        console.warn('Error processing block in lesson:', this._id, 'block type:', block.type, blockError);
+      }
+    });
+  } catch (error) {
+    console.warn('Error calculating content summary for lesson:', this._id, error);
+  }
   
   return summary;
 });
 
 // Pre-save middleware to handle slug generation and content analysis
 lessonSchema.pre('save', function(next) {
-  // Generate slug from title if title is modified
-  if (this.isModified('title')) {
-    this.slug = slugify(this.title, { 
-      lower: true, 
-      strict: true,
-      remove: /[*+~.()'"!:@]/g
-    });
+  try {
+    // Generate slug from title if title is modified
+    if (this.isModified('title') && this.title) {
+      this.slug = slugify(this.title, { 
+        lower: true, 
+        strict: true,
+        remove: /[*+~.()'"!:@]/g
+      });
+    }
+    
+    // Update content flags based on content analysis
+    if (this.isModified('content')) {
+      // Reset flags
+      this.hasVideo = false;
+      this.hasQuiz = false;
+      this.hasCode = false;
+      this.hasImages = false;
+      
+      // Safely analyze content
+      if (this.content && this.content.blocks && Array.isArray(this.content.blocks)) {
+        try {
+          this.content.blocks.forEach(block => {
+            if (!block || !block.type) return;
+            
+            switch (block.type) {
+              case 'video':
+              case 'embed':
+                this.hasVideo = true;
+                break;
+              case 'quiz':
+              case 'checklist':
+                this.hasQuiz = true;
+                break;
+              case 'code':
+                this.hasCode = true;
+                break;
+              case 'image':
+              case 'imageGallery':
+                this.hasImages = true;
+                break;
+            }
+          });
+        } catch (contentError) {
+          console.warn('Error analyzing content flags for lesson:', this._id, contentError);
+        }
+      }
+    }
+    
+    // Set publishedAt when publishing for the first time
+    if (this.isModified('isPublished') && this.isPublished && !this.publishedAt) {
+      this.publishedAt = new Date();
+    }
+    
+    // Clear publishedAt when unpublishing
+    if (this.isModified('isPublished') && !this.isPublished) {
+      this.publishedAt = undefined;
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Error in lesson pre-save middleware:', error);
+    next(error);
   }
-  
-  // Update content flags based on content analysis
-  if (this.isModified('content')) {
-    const summary = this.contentSummary;
-    this.hasVideo = summary.videoBlocks > 0;
-    this.hasQuiz = summary.quizBlocks > 0;
-    this.hasCode = summary.codeBlocks > 0;
-  }
-  
-  // Set publishedAt when publishing for the first time
-  if (this.isModified('isPublished') && this.isPublished && !this.publishedAt) {
-    this.publishedAt = new Date();
-  }
-  
-  // Clear publishedAt when unpublishing
-  if (this.isModified('isPublished') && !this.isPublished) {
-    this.publishedAt = undefined;
-  }
-  
-  next();
 });
 
 // Instance method to increment view count
@@ -261,6 +340,86 @@ lessonSchema.methods.incrementViews = function() {
 lessonSchema.methods.incrementCompletions = function() {
   this.completions += 1;
   return this.save();
+};
+
+// Instance method to validate content structure
+lessonSchema.methods.validateContent = function() {
+  if (!this.content) {
+    return { isValid: false, message: 'Content is required' };
+  }
+  
+  if (!this.content.blocks || !Array.isArray(this.content.blocks)) {
+    return { isValid: false, message: 'Content must have blocks array' };
+  }
+  
+  if (!this.content.time || typeof this.content.time !== 'number') {
+    return { isValid: false, message: 'Content must have time field' };
+  }
+  
+  if (!this.content.version || typeof this.content.version !== 'string') {
+    return { isValid: false, message: 'Content must have version field' };
+  }
+  
+  // Validate each block
+  for (let i = 0; i < this.content.blocks.length; i++) {
+    const block = this.content.blocks[i];
+    
+    if (!block || typeof block !== 'object') {
+      return { isValid: false, message: `Block ${i + 1} must be a valid object` };
+    }
+    
+    if (!block.type || typeof block.type !== 'string') {
+      return { isValid: false, message: `Block ${i + 1} must have a valid type` };
+    }
+    
+    if (!block.data || typeof block.data !== 'object') {
+      return { isValid: false, message: `Block ${i + 1} must have valid data` };
+    }
+  }
+  
+  return { isValid: true };
+};
+
+// Instance method to safely get content text
+lessonSchema.methods.getContentText = function() {
+  if (!this.content || !this.content.blocks || !Array.isArray(this.content.blocks)) {
+    return '';
+  }
+  
+  let text = '';
+  
+  try {
+    this.content.blocks.forEach(block => {
+      if (!block || !block.type || !block.data) return;
+      
+      switch (block.type) {
+        case 'paragraph':
+        case 'header':
+          if (block.data.text && typeof block.data.text === 'string') {
+            text += block.data.text.replace(/<[^>]*>/g, '') + '\n';
+          }
+          break;
+        case 'list':
+          if (Array.isArray(block.data.items)) {
+            block.data.items.forEach(item => {
+              if (typeof item === 'string') {
+                text += item.replace(/<[^>]*>/g, '') + '\n';
+              }
+            });
+          }
+          break;
+        case 'quote':
+          if (block.data.text && typeof block.data.text === 'string') {
+            text += block.data.text.replace(/<[^>]*>/g, '') + '\n';
+          }
+          break;
+      }
+    });
+  } catch (error) {
+    console.warn('Error extracting content text for lesson:', this._id, error);
+  }
+  
+  return text.trim();
 };
 
 // Static method to find lessons by tutorial with optional filters
@@ -280,11 +439,16 @@ lessonSchema.statics.findByTutorial = function(tutorialId, options = {}) {
 
 // Static method to get next order number for a tutorial
 lessonSchema.statics.getNextOrder = async function(tutorialId) {
-  const lastLesson = await this.findOne({ tutorial: tutorialId })
-    .sort({ order: -1 })
-    .select('order');
-  
-  return lastLesson ? lastLesson.order + 1 : 1;
+  try {
+    const lastLesson = await this.findOne({ tutorial: tutorialId })
+      .sort({ order: -1 })
+      .select('order');
+    
+    return lastLesson ? lastLesson.order + 1 : 1;
+  } catch (error) {
+    console.error('Error getting next order for tutorial:', tutorialId, error);
+    return 1;
+  }
 };
 
 // Static method to reorder lessons
@@ -301,8 +465,65 @@ lessonSchema.statics.reorderInTutorial = async function(tutorialId, lessonOrders
         );
       }
     });
+  } catch (error) {
+    console.error('Error reordering lessons in tutorial:', tutorialId, error);
+    throw error;
   } finally {
     await session.endSession();
+  }
+};
+
+// Static method to find lessons with safe content loading
+lessonSchema.statics.findSafe = function(query, options = {}) {
+  return this.find(query, null, options)
+    .lean() // Use lean to avoid virtual method errors
+    .populate('tutorial', 'title slug isPublished');
+};
+
+// Static method to count lessons by tutorial
+lessonSchema.statics.countByTutorial = async function(tutorialId) {
+  try {
+    return await this.countDocuments({ tutorial: tutorialId });
+  } catch (error) {
+    console.error('Error counting lessons for tutorial:', tutorialId, error);
+    return 0;
+  }
+};
+
+// Static method to get lesson statistics
+lessonSchema.statics.getStatistics = async function() {
+  try {
+    const stats = await this.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalLessons: { $sum: 1 },
+          publishedLessons: {
+            $sum: { $cond: [{ $eq: ['$isPublished', true] }, 1, 0] }
+          },
+          totalViews: { $sum: '$views' },
+          totalCompletions: { $sum: '$completions' },
+          averageDuration: { $avg: '$duration' }
+        }
+      }
+    ]);
+    
+    return stats[0] || {
+      totalLessons: 0,
+      publishedLessons: 0,
+      totalViews: 0,
+      totalCompletions: 0,
+      averageDuration: 0
+    };
+  } catch (error) {
+    console.error('Error getting lesson statistics:', error);
+    return {
+      totalLessons: 0,
+      publishedLessons: 0,
+      totalViews: 0,
+      totalCompletions: 0,
+      averageDuration: 0
+    };
   }
 };
 

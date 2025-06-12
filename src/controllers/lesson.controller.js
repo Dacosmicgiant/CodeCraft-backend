@@ -2,25 +2,166 @@
 import Lesson from '../models/lesson.model.js';
 import Tutorial from '../models/tutorial.model.js';
 
-// Helper function to validate lesson content structure
-const validateLessonContent = (content) => {
+// Enhanced EditorJS content validation
+const validateEditorJSContent = (content) => {
+  // Basic structure validation
   if (!content || typeof content !== 'object') {
     return { isValid: false, message: 'Content must be a valid object' };
   }
   
-  if (!content.blocks || !Array.isArray(content.blocks)) {
-    return { isValid: false, message: 'Content must have a blocks array' };
+  // Check required fields
+  if (!content.hasOwnProperty('time')) {
+    return { isValid: false, message: 'Content must have a time field' };
+  }
+  
+  if (!content.hasOwnProperty('blocks')) {
+    return { isValid: false, message: 'Content must have a blocks field' };
+  }
+  
+  if (!Array.isArray(content.blocks)) {
+    return { isValid: false, message: 'Content blocks must be an array' };
+  }
+  
+  if (!content.hasOwnProperty('version')) {
+    return { isValid: false, message: 'Content must have a version field' };
   }
   
   // Validate each block
   for (let i = 0; i < content.blocks.length; i++) {
     const block = content.blocks[i];
-    if (!block.type) {
-      return { isValid: false, message: `Block ${i + 1} is missing a type` };
+    
+    if (!block || typeof block !== 'object') {
+      return { isValid: false, message: `Block ${i + 1} must be a valid object` };
+    }
+    
+    if (!block.type || typeof block.type !== 'string') {
+      return { isValid: false, message: `Block ${i + 1} must have a valid type` };
+    }
+    
+    if (!block.data || typeof block.data !== 'object') {
+      return { isValid: false, message: `Block ${i + 1} must have valid data` };
+    }
+    
+    // Validate specific block types
+    const blockValidation = validateBlockType(block, i + 1);
+    if (!blockValidation.isValid) {
+      return blockValidation;
     }
   }
   
   return { isValid: true };
+};
+
+// Validate specific block types
+const validateBlockType = (block, blockNumber) => {
+  const { type, data } = block;
+  
+  switch (type) {
+    case 'paragraph':
+      if (typeof data.text !== 'string') {
+        return { isValid: false, message: `Block ${blockNumber} (paragraph): text must be a string` };
+      }
+      break;
+      
+    case 'header':
+      if (typeof data.text !== 'string') {
+        return { isValid: false, message: `Block ${blockNumber} (header): text must be a string` };
+      }
+      if (data.level && (!Number.isInteger(data.level) || data.level < 1 || data.level > 6)) {
+        return { isValid: false, message: `Block ${blockNumber} (header): level must be between 1 and 6` };
+      }
+      break;
+      
+    case 'list':
+      if (!Array.isArray(data.items)) {
+        return { isValid: false, message: `Block ${blockNumber} (list): items must be an array` };
+      }
+      if (data.style && !['ordered', 'unordered'].includes(data.style)) {
+        return { isValid: false, message: `Block ${blockNumber} (list): style must be 'ordered' or 'unordered'` };
+      }
+      break;
+      
+    case 'code':
+      if (typeof data.code !== 'string') {
+        return { isValid: false, message: `Block ${blockNumber} (code): code must be a string` };
+      }
+      break;
+      
+    case 'quote':
+      if (typeof data.text !== 'string') {
+        return { isValid: false, message: `Block ${blockNumber} (quote): text must be a string` };
+      }
+      break;
+      
+    case 'image':
+      if (!data.file || typeof data.file.url !== 'string') {
+        return { isValid: false, message: `Block ${blockNumber} (image): must have a valid file.url` };
+      }
+      break;
+      
+    case 'embed':
+      if (!data.source || typeof data.source !== 'string') {
+        return { isValid: false, message: `Block ${blockNumber} (embed): source must be a string` };
+      }
+      break;
+      
+    case 'table':
+      if (!Array.isArray(data.content)) {
+        return { isValid: false, message: `Block ${blockNumber} (table): content must be an array` };
+      }
+      break;
+      
+    case 'delimiter':
+      // Delimiter blocks typically don't have specific data requirements
+      break;
+      
+    case 'checklist':
+      if (!Array.isArray(data.items)) {
+        return { isValid: false, message: `Block ${blockNumber} (checklist): items must be an array` };
+      }
+      break;
+      
+    // Add more block type validations as needed
+    default:
+      // For unknown block types, just ensure data exists
+      if (!data) {
+        return { isValid: false, message: `Block ${blockNumber} (${type}): data is required` };
+      }
+  }
+  
+  return { isValid: true };
+};
+
+// Helper function to sanitize EditorJS content
+const sanitizeEditorJSContent = (content) => {
+  const sanitized = {
+    time: typeof content.time === 'number' ? content.time : Date.now(),
+    blocks: [],
+    version: typeof content.version === 'string' ? content.version : "2.28.2"
+  };
+  
+  if (Array.isArray(content.blocks)) {
+    sanitized.blocks = content.blocks.map((block, index) => {
+      const sanitizedBlock = {
+        type: block.type,
+        data: block.data || {}
+      };
+      
+      // Include id if present
+      if (block.id) {
+        sanitizedBlock.id = block.id;
+      }
+      
+      // Include tunes if present
+      if (block.tunes) {
+        sanitizedBlock.tunes = block.tunes;
+      }
+      
+      return sanitizedBlock;
+    });
+  }
+  
+  return sanitized;
 };
 
 // Helper function to check for duplicate orders
@@ -46,6 +187,8 @@ export const createLesson = async (req, res) => {
     const { tutorialId } = req.params;
     const { title, order, content, duration, isPublished } = req.body;
     
+    console.log('📝 Creating lesson with content:', JSON.stringify(content, null, 2));
+    
     // Validate required fields
     if (!title || !title.trim()) {
       return res.status(400).json({ 
@@ -68,7 +211,7 @@ export const createLesson = async (req, res) => {
       });
     }
     
-    // Check if tutorial exists and populate basic info
+    // Check if tutorial exists
     const tutorial = await Tutorial.findById(tutorialId).select('title slug isPublished');
     
     if (!tutorial) {
@@ -78,14 +221,24 @@ export const createLesson = async (req, res) => {
       });
     }
     
-    // Validate content structure
-    const contentValidation = validateLessonContent(content);
+    // Validate and sanitize EditorJS content
+    const contentToValidate = content || {
+      time: Date.now(),
+      blocks: [],
+      version: "2.28.2"
+    };
+    
+    const contentValidation = validateEditorJSContent(contentToValidate);
     if (!contentValidation.isValid) {
+      console.error('❌ Content validation failed:', contentValidation.message);
       return res.status(400).json({ 
         success: false,
-        message: contentValidation.message 
+        message: `Content validation failed: ${contentValidation.message}` 
       });
     }
+    
+    const sanitizedContent = sanitizeEditorJSContent(contentToValidate);
+    console.log('✅ Content validated and sanitized:', JSON.stringify(sanitizedContent, null, 2));
     
     // Check for duplicate order within the same tutorial
     const duplicateOrder = await checkDuplicateOrder(tutorialId, order);
@@ -96,18 +249,14 @@ export const createLesson = async (req, res) => {
       });
     }
     
-    // Create lesson with proper content structure
+    // Create lesson
     const lessonData = {
       title: title.trim(),
       order: parseInt(order),
       tutorial: tutorialId,
-      content: content || {
-        time: Date.now(),
-        blocks: [],
-        version: "2.28.2"
-      },
+      content: sanitizedContent,
       duration: parseInt(duration),
-      isPublished: isPublished || false
+      isPublished: Boolean(isPublished)
     };
     
     // Set publishedAt if being published
@@ -115,10 +264,14 @@ export const createLesson = async (req, res) => {
       lessonData.publishedAt = new Date();
     }
     
+    console.log('💾 Creating lesson with data:', JSON.stringify(lessonData, null, 2));
+    
     const lesson = await Lesson.create(lessonData);
     
     // Populate tutorial information for response
     await lesson.populate('tutorial', 'title slug isPublished');
+    
+    console.log('✅ Lesson created successfully:', lesson._id);
     
     res.status(201).json({
       success: true,
@@ -126,7 +279,7 @@ export const createLesson = async (req, res) => {
       data: lesson
     });
   } catch (error) {
-    console.error('Error in createLesson:', error);
+    console.error('❌ Error in createLesson:', error);
     
     // Handle validation errors from Mongoose
     if (error.name === 'ValidationError') {
@@ -138,10 +291,142 @@ export const createLesson = async (req, res) => {
       });
     }
     
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'A lesson with this order already exists in the tutorial' 
+      });
+    }
+    
     res.status(500).json({ 
       success: false,
       message: 'Server error', 
       error: error.message 
+    });
+  }
+};
+
+// src/controllers/lesson.controller.js - Add this function
+
+// @desc    Get all lessons (admin only) with pagination and filters
+// @route   GET /api/v1/lessons
+// @access  Private/Admin
+export const getAllLessons = async (req, res) => {
+  try {
+    console.log('🔍 getAllLessons called');
+    console.log('📤 User:', req.user?.username, req.user?.role);
+    console.log('📤 Query:', req.query);
+    
+    const { page = 1, limit = 10, search, tutorial, published } = req.query;
+    
+    // Check authentication and authorization
+    if (!req.user) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'Authentication required' 
+      });
+    }
+    
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Access denied. Admin privileges required.' 
+      });
+    }
+    
+    // Build query
+    const query = {};
+    
+    if (tutorial) {
+      query.tutorial = tutorial;
+    }
+    
+    if (published !== undefined) {
+      query.isPublished = published === 'true';
+    }
+    
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    console.log('📋 Database query:', query);
+    
+    // Count total lessons
+    const total = await Lesson.countDocuments(query);
+    console.log('📊 Total lessons found:', total);
+    
+    // If no lessons found, return empty result
+    if (total === 0) {
+      console.log('✅ No lessons found, returning empty result');
+      return res.json({
+        success: true,
+        message: 'No lessons found',
+        data: [],
+        pagination: {
+          total: 0,
+          page: parseInt(page),
+          pages: 0,
+          limit: parseInt(limit)
+        }
+      });
+    }
+    
+    // Get lessons with pagination - using lean() to avoid virtual method errors
+    const lessons = await Lesson.find(query)
+      .populate('tutorial', 'title slug isPublished')
+      .select('-__v') // Exclude version field
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .lean(); // Use lean() to get plain objects and avoid virtual method errors
+    
+    console.log('📝 Lessons retrieved:', lessons.length);
+    
+    // Manually format the lessons to ensure consistent structure
+    const formattedLessons = lessons.map(lesson => ({
+      _id: lesson._id,
+      title: lesson.title || 'Untitled Lesson',
+      slug: lesson.slug || '',
+      order: lesson.order || 1,
+      tutorial: lesson.tutorial || null,
+      duration: lesson.duration || 0,
+      isPublished: lesson.isPublished || false,
+      publishedAt: lesson.publishedAt || null,
+      createdAt: lesson.createdAt,
+      updatedAt: lesson.updatedAt,
+      // Only include content summary, not full content for list view
+      hasContent: !!(lesson.content && lesson.content.blocks && lesson.content.blocks.length > 0),
+      blockCount: lesson.content?.blocks?.length || 0
+    }));
+    
+    res.json({
+      success: true,
+      message: 'Lessons retrieved successfully',
+      data: formattedLessons,
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        limit: parseInt(limit)
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in getAllLessons:', error);
+    console.error('❌ Error stack:', error.stack);
+    
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error while fetching lessons', 
+      error: error.message,
+      debug: {
+        query: req.query,
+        userExists: !!req.user,
+        userRole: req.user?.role
+      }
     });
   }
 };
@@ -265,6 +550,8 @@ export const updateLesson = async (req, res) => {
     const { id } = req.params;
     const { title, order, content, duration, isPublished } = req.body;
     
+    console.log('📝 Updating lesson with content:', JSON.stringify(content, null, 2));
+    
     const lesson = await Lesson.findById(id).populate('tutorial', 'title slug');
     
     if (!lesson) {
@@ -296,13 +583,14 @@ export const updateLesson = async (req, res) => {
       });
     }
     
-    // Validate content if being updated
+    // Validate and sanitize content if being updated
     if (content !== undefined) {
-      const contentValidation = validateLessonContent(content);
+      const contentValidation = validateEditorJSContent(content);
       if (!contentValidation.isValid) {
+        console.error('❌ Content validation failed:', contentValidation.message);
         return res.status(400).json({ 
           success: false,
-          message: contentValidation.message 
+          message: `Content validation failed: ${contentValidation.message}` 
         });
       }
     }
@@ -321,13 +609,16 @@ export const updateLesson = async (req, res) => {
     // Update fields
     if (title !== undefined) lesson.title = title.trim();
     if (order !== undefined) lesson.order = parseInt(order);
-    if (content !== undefined) lesson.content = content;
+    if (content !== undefined) {
+      lesson.content = sanitizeEditorJSContent(content);
+      console.log('✅ Content sanitized for update:', JSON.stringify(lesson.content, null, 2));
+    }
     if (duration !== undefined) lesson.duration = parseInt(duration);
     
     // Handle publishing status
     if (isPublished !== undefined && isPublished !== lesson.isPublished) {
-      lesson.isPublished = isPublished;
-      if (isPublished) {
+      lesson.isPublished = Boolean(isPublished);
+      if (lesson.isPublished) {
         lesson.publishedAt = new Date();
       } else {
         lesson.publishedAt = undefined;
@@ -339,13 +630,15 @@ export const updateLesson = async (req, res) => {
     // Re-populate for response
     await updatedLesson.populate('tutorial', 'title slug isPublished');
     
+    console.log('✅ Lesson updated successfully:', updatedLesson._id);
+    
     res.json({
       success: true,
       message: 'Lesson updated successfully',
       data: updatedLesson
     });
   } catch (error) {
-    console.error('Error in updateLesson:', error);
+    console.error('❌ Error in updateLesson:', error);
     
     // Handle validation errors from Mongoose
     if (error.name === 'ValidationError') {
@@ -354,6 +647,14 @@ export const updateLesson = async (req, res) => {
         success: false,
         message: 'Validation failed',
         errors: validationErrors
+      });
+    }
+    
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'A lesson with this order already exists in the tutorial' 
       });
     }
     
@@ -412,6 +713,8 @@ export const updateLessonContent = async (req, res) => {
     const { id } = req.params;
     const { content } = req.body;
     
+    console.log('📝 Updating lesson content:', JSON.stringify(content, null, 2));
+    
     const lesson = await Lesson.findById(id);
     
     if (!lesson) {
@@ -421,17 +724,22 @@ export const updateLessonContent = async (req, res) => {
       });
     }
     
-    // Validate content structure
-    const contentValidation = validateLessonContent(content);
+    // Validate EditorJS content structure
+    const contentValidation = validateEditorJSContent(content);
     if (!contentValidation.isValid) {
+      console.error('❌ Content validation failed:', contentValidation.message);
       return res.status(400).json({ 
         success: false,
-        message: contentValidation.message 
+        message: `Content validation failed: ${contentValidation.message}` 
       });
     }
     
-    lesson.content = content;
+    lesson.content = sanitizeEditorJSContent(content);
+    console.log('✅ Content sanitized:', JSON.stringify(lesson.content, null, 2));
+    
     const updatedLesson = await lesson.save();
+    
+    console.log('✅ Lesson content updated successfully:', updatedLesson._id);
     
     res.json({
       success: true,
@@ -439,7 +747,7 @@ export const updateLessonContent = async (req, res) => {
       data: updatedLesson
     });
   } catch (error) {
-    console.error('Error in updateLessonContent:', error);
+    console.error('❌ Error in updateLessonContent:', error);
     res.status(500).json({ 
       success: false,
       message: 'Server error', 
@@ -470,12 +778,12 @@ export const duplicateLesson = async (req, res) => {
     
     const nextOrder = lastLesson ? lastLesson.order + 1 : 1;
     
-    // Create duplicate lesson
+    // Create duplicate lesson with properly structured content
     const duplicateData = {
       title: `${originalLesson.title} (Copy)`,
       order: nextOrder,
       tutorial: originalLesson.tutorial._id,
-      content: originalLesson.content,
+      content: sanitizeEditorJSContent(originalLesson.content),
       duration: originalLesson.duration,
       isPublished: false // Always create copies as drafts
     };
