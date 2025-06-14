@@ -2,7 +2,7 @@
 import mongoose from 'mongoose';
 import slugify from 'slugify';
 
-// Content block schema with enhanced validation for EditorJS format
+// Enhanced content block schema with better media support for EditorJS
 const contentBlockSchema = new mongoose.Schema({
   id: String, // EditorJS block ID
   type: {
@@ -29,7 +29,10 @@ const contentBlockSchema = new mongoose.Schema({
     
     // Code block
     code: String,
-    language: String,
+    language: {
+      type: String,
+      default: 'javascript'
+    },
     
     // List block (EditorJS format)
     style: {
@@ -38,28 +41,60 @@ const contentBlockSchema = new mongoose.Schema({
       default: 'unordered'
     },
     meta: mongoose.Schema.Types.Mixed,
-    items: [mongoose.Schema.Types.Mixed], // EditorJS list items are objects with content, meta, items
+    items: [mongoose.Schema.Types.Mixed], // EditorJS list items
     
     // Quote block
     caption: String,
-    alignment: String,
+    alignment: {
+      type: String,
+      enum: ['left', 'center', 'right'],
+      default: 'left'
+    },
     
     // Warning block
     title: String,
     message: String,
     
     // Table block
-    withHeadings: Boolean,
-    stretched: Boolean,
+    withHeadings: {
+      type: Boolean,
+      default: false
+    },
+    stretched: {
+      type: Boolean,
+      default: false
+    },
     content: [[String]], // 2D array for table content
     
-    // Image block
+    // Enhanced Image block
     url: String,
     alt: String,
+    withBorder: {
+      type: Boolean,
+      default: false
+    },
+    withBackground: {
+      type: Boolean,
+      default: false
+    },
     
-    // Video block
-    source: String,
-    poster: String,
+    // Enhanced Video/Embed block
+    service: {
+      type: String,
+      enum: ['youtube', 'vimeo', 'codepen', 'iframe', 'custom'],
+      default: 'youtube'
+    },
+    embed: String, // Processed embed URL
+    width: {
+      type: Number,
+      default: 560
+    },
+    height: {
+      type: Number,
+      default: 315
+    },
+    videoId: String, // For YouTube/Vimeo
+    thumbnail: String, // Thumbnail URL
     
     // Quiz block
     question: String,
@@ -67,14 +102,18 @@ const contentBlockSchema = new mongoose.Schema({
     correctAnswer: Number,
     explanation: String,
     
-    // Embed block
-    service: String,
-    embed: String,
-    width: Number,
-    height: Number,
-    
     // Raw HTML block
     html: String,
+    
+    // Link Tool block
+    link: String,
+    
+    // Validation flags
+    invalid: {
+      type: Boolean,
+      default: false
+    },
+    invalidReason: String,
     
     // Generic data for any other blocks
     file: mongoose.Schema.Types.Mixed,
@@ -153,7 +192,7 @@ const lessonSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  // Content flags
+  // Enhanced content flags
   difficulty: {
     type: String,
     enum: ['beginner', 'intermediate', 'advanced'],
@@ -170,6 +209,37 @@ const lessonSchema = new mongoose.Schema({
   hasCode: {
     type: Boolean,
     default: false
+  },
+  hasImage: {
+    type: Boolean,
+    default: false
+  },
+  hasEmbed: {
+    type: Boolean,
+    default: false
+  },
+  // Media summary
+  mediaSummary: {
+    images: {
+      type: Number,
+      default: 0
+    },
+    videos: {
+      type: Number,
+      default: 0
+    },
+    embeds: {
+      type: Number,
+      default: 0
+    },
+    youtubeVideos: {
+      type: Number,
+      default: 0
+    },
+    vimeoVideos: {
+      type: Number,
+      default: 0
+    }
   }
 }, {
   timestamps: true,
@@ -184,6 +254,7 @@ lessonSchema.index({ tutorial: 1, order: 1 }, { unique: true });
 lessonSchema.index({ tutorial: 1, isPublished: 1, order: 1 });
 lessonSchema.index({ isPublished: 1, publishedAt: -1 });
 lessonSchema.index({ createdAt: -1 });
+lessonSchema.index({ hasVideo: 1, hasImage: 1, hasEmbed: 1 }); // Media-based queries
 
 // Helper function to safely process blocks
 const safelyProcessBlocks = function(callback) {
@@ -202,29 +273,70 @@ const safelyProcessBlocks = function(callback) {
   return callback(validBlocks);
 };
 
-// Virtual for estimated reading time based on content
+// Enhanced virtual for estimated reading time based on content
 lessonSchema.virtual('estimatedReadingTime').get(function() {
   if (!this.content || !this.content.blocks) return this.duration;
   
   return safelyProcessBlocks.call(this, (validBlocks) => {
     let wordCount = 0;
+    let mediaTime = 0; // Additional time for media content
     
     validBlocks.forEach(block => {
       try {
-        if (block.type === 'paragraph' && block.data && block.data.text) {
-          wordCount += block.data.text.split(/\s+/).length;
-        } else if (block.type === 'header' && block.data && block.data.text) {
-          wordCount += block.data.text.split(/\s+/).length;
-        } else if (block.type === 'list' && block.data && block.data.items) {
-          block.data.items.forEach(item => {
-            if (typeof item === 'string') {
-              wordCount += item.split(/\s+/).length;
-            } else if (item && item.content) {
-              wordCount += item.content.split(/\s+/).length;
+        switch (block.type) {
+          case 'paragraph':
+          case 'text':
+            if (block.data && block.data.text) {
+              wordCount += block.data.text.split(/\s+/).length;
             }
-          });
-        } else if (block.type === 'quote' && block.data && block.data.text) {
-          wordCount += block.data.text.split(/\s+/).length;
+            break;
+          case 'header':
+            if (block.data && block.data.text) {
+              wordCount += block.data.text.split(/\s+/).length;
+            }
+            break;
+          case 'list':
+            if (block.data && block.data.items) {
+              block.data.items.forEach(item => {
+                if (typeof item === 'string') {
+                  wordCount += item.split(/\s+/).length;
+                } else if (item && item.content) {
+                  wordCount += item.content.split(/\s+/).length;
+                }
+              });
+            }
+            break;
+          case 'quote':
+            if (block.data && block.data.text) {
+              wordCount += block.data.text.split(/\s+/).length;
+            }
+            break;
+          case 'code':
+            // Code blocks take longer to read
+            if (block.data && block.data.code) {
+              wordCount += block.data.code.split(/\s+/).length * 1.5;
+            }
+            break;
+          case 'image':
+            // Images add viewing time
+            mediaTime += 0.5; // 30 seconds per image
+            break;
+          case 'video':
+          case 'embed':
+            // Videos add significant time
+            if (block.data && block.data.service === 'youtube') {
+              mediaTime += 2; // Assume 2 minutes average for YouTube videos
+            } else {
+              mediaTime += 1; // 1 minute for other embeds
+            }
+            break;
+          case 'table':
+            // Tables take longer to process
+            if (block.data && block.data.content) {
+              const cellCount = block.data.content.reduce((total, row) => total + row.length, 0);
+              wordCount += cellCount * 2; // Assume 2 words per cell on average
+            }
+            break;
         }
       } catch (error) {
         console.warn('Error processing block for reading time:', error);
@@ -233,11 +345,12 @@ lessonSchema.virtual('estimatedReadingTime').get(function() {
     
     // Average reading speed: 200 words per minute
     const readingTime = Math.ceil(wordCount / 200);
-    return Math.max(readingTime, 1); // Minimum 1 minute
+    const totalTime = readingTime + mediaTime;
+    return Math.max(totalTime, 1); // Minimum 1 minute
   });
 });
 
-// Virtual for content summary
+// Enhanced virtual for content summary
 lessonSchema.virtual('contentSummary').get(function() {
   if (!this.content || !this.content.blocks) {
     return {
@@ -246,10 +359,19 @@ lessonSchema.virtual('contentSummary').get(function() {
       codeBlocks: 0,
       imageBlocks: 0,
       videoBlocks: 0,
+      embedBlocks: 0,
       quizBlocks: 0,
       listBlocks: 0,
       checklistBlocks: 0,
-      hasInteractiveContent: false
+      tableBlocks: 0,
+      hasInteractiveContent: false,
+      mediaSummary: {
+        images: 0,
+        videos: 0,
+        embeds: 0,
+        youtubeVideos: 0,
+        vimeoVideos: 0
+      }
     };
   }
   
@@ -260,10 +382,19 @@ lessonSchema.virtual('contentSummary').get(function() {
       codeBlocks: 0,
       imageBlocks: 0,
       videoBlocks: 0,
+      embedBlocks: 0,
       quizBlocks: 0,
       listBlocks: 0,
       checklistBlocks: 0,
-      hasInteractiveContent: false
+      tableBlocks: 0,
+      hasInteractiveContent: false,
+      mediaSummary: {
+        images: 0,
+        videos: 0,
+        embeds: 0,
+        youtubeVideos: 0,
+        vimeoVideos: 0
+      }
     };
     
     validBlocks.forEach(block => {
@@ -279,9 +410,25 @@ lessonSchema.virtual('contentSummary').get(function() {
             break;
           case 'image':
             summary.imageBlocks++;
+            summary.mediaSummary.images++;
             break;
           case 'video':
             summary.videoBlocks++;
+            summary.mediaSummary.videos++;
+            if (block.data && block.data.service === 'youtube') {
+              summary.mediaSummary.youtubeVideos++;
+            } else if (block.data && block.data.service === 'vimeo') {
+              summary.mediaSummary.vimeoVideos++;
+            }
+            break;
+          case 'embed':
+            summary.embedBlocks++;
+            summary.mediaSummary.embeds++;
+            if (block.data && block.data.service === 'youtube') {
+              summary.mediaSummary.youtubeVideos++;
+            } else if (block.data && block.data.service === 'vimeo') {
+              summary.mediaSummary.vimeoVideos++;
+            }
             break;
           case 'quiz':
             summary.quizBlocks++;
@@ -295,6 +442,9 @@ lessonSchema.virtual('contentSummary').get(function() {
               summary.listBlocks++;
             }
             break;
+          case 'table':
+            summary.tableBlocks++;
+            break;
         }
       } catch (error) {
         console.warn('Error processing block for summary:', error);
@@ -303,6 +453,16 @@ lessonSchema.virtual('contentSummary').get(function() {
     
     return summary;
   });
+});
+
+// Virtual for media-rich content detection
+lessonSchema.virtual('isMediaRich').get(function() {
+  const summary = this.contentSummary;
+  const totalMedia = summary.imageBlocks + summary.videoBlocks + summary.embedBlocks;
+  const totalBlocks = summary.totalBlocks;
+  
+  // Consider media-rich if more than 25% of blocks are media
+  return totalBlocks > 0 && (totalMedia / totalBlocks) > 0.25;
 });
 
 // Pre-save middleware to handle slug generation and content analysis
@@ -317,19 +477,36 @@ lessonSchema.pre('save', function(next) {
       });
     }
     
-    // Update content flags based on content analysis
+    // Update content flags and media summary based on content analysis
     if (this.isModified('content')) {
       try {
         const summary = this.contentSummary;
-        this.hasVideo = summary.videoBlocks > 0;
+        
+        // Update content flags
+        this.hasVideo = summary.videoBlocks > 0 || summary.embedBlocks > 0;
         this.hasQuiz = summary.quizBlocks > 0;
         this.hasCode = summary.codeBlocks > 0;
+        this.hasImage = summary.imageBlocks > 0;
+        this.hasEmbed = summary.embedBlocks > 0;
+        
+        // Update media summary
+        this.mediaSummary = summary.mediaSummary;
+        
       } catch (error) {
         console.warn('Error updating content flags:', error);
         // Set defaults if analysis fails
         this.hasVideo = false;
         this.hasQuiz = false;
         this.hasCode = false;
+        this.hasImage = false;
+        this.hasEmbed = false;
+        this.mediaSummary = {
+          images: 0,
+          videos: 0,
+          embeds: 0,
+          youtubeVideos: 0,
+          vimeoVideos: 0
+        };
       }
     }
     
@@ -365,6 +542,18 @@ lessonSchema.post('save', function(doc, next) {
       if (invalidBlocks.length > 0) {
         console.warn(`Lesson ${doc._id} has ${invalidBlocks.length} invalid blocks`);
       }
+      
+      // Check for invalid media blocks
+      const invalidMediaBlocks = doc.content.blocks.filter(block => 
+        block && 
+        (block.type === 'image' || block.type === 'video' || block.type === 'embed') &&
+        block.data && 
+        block.data.invalid
+      );
+      
+      if (invalidMediaBlocks.length > 0) {
+        console.warn(`Lesson ${doc._id} has ${invalidMediaBlocks.length} invalid media blocks`);
+      }
     }
     next();
   } catch (error) {
@@ -396,20 +585,85 @@ lessonSchema.methods.cleanContent = function() {
     return this;
   }
   
-  // Filter out invalid blocks
+  // Filter out invalid blocks and clean media blocks
   const validBlocks = this.content.blocks.filter(block => 
     block && 
     typeof block === 'object' && 
     block.type && 
     typeof block.type === 'string'
-  ).map(block => ({
-    id: block.id || `block_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    type: block.type,
-    data: block.data || {}
-  }));
+  ).map(block => {
+    const cleanBlock = {
+      id: block.id || `block_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type: block.type,
+      data: block.data || {}
+    };
+    
+    // Clean specific block types
+    if (block.type === 'image' && block.data) {
+      cleanBlock.data = {
+        url: block.data.url || '',
+        alt: block.data.alt || '',
+        caption: block.data.caption || '',
+        stretched: block.data.stretched || false,
+        withBorder: block.data.withBorder || false,
+        withBackground: block.data.withBackground || false
+      };
+    } else if ((block.type === 'video' || block.type === 'embed') && block.data) {
+      cleanBlock.data = {
+        service: block.data.service || 'youtube',
+        url: block.data.url || '',
+        embed: block.data.embed || '',
+        width: block.data.width || 560,
+        height: block.data.height || 315,
+        caption: block.data.caption || '',
+        videoId: block.data.videoId || '',
+        thumbnail: block.data.thumbnail || ''
+      };
+    }
+    
+    return cleanBlock;
+  });
   
   this.content.blocks = validBlocks;
   return this;
+};
+
+// Instance method to extract all media URLs
+lessonSchema.methods.getMediaUrls = function() {
+  const mediaUrls = {
+    images: [],
+    videos: [],
+    embeds: []
+  };
+  
+  if (!this.content || !this.content.blocks) {
+    return mediaUrls;
+  }
+  
+  this.content.blocks.forEach(block => {
+    if (block && block.type === 'image' && block.data && block.data.url) {
+      mediaUrls.images.push({
+        url: block.data.url,
+        alt: block.data.alt,
+        caption: block.data.caption
+      });
+    } else if (block && (block.type === 'video' || block.type === 'embed') && block.data) {
+      const mediaItem = {
+        url: block.data.url,
+        embedUrl: block.data.embed,
+        service: block.data.service,
+        caption: block.data.caption
+      };
+      
+      if (block.type === 'video') {
+        mediaUrls.videos.push(mediaItem);
+      } else {
+        mediaUrls.embeds.push(mediaItem);
+      }
+    }
+  });
+  
+  return mediaUrls;
 };
 
 // Static method to find lessons by tutorial with optional filters
@@ -424,7 +678,32 @@ lessonSchema.statics.findByTutorial = function(tutorialId, options = {}) {
     query.difficulty = options.difficulty;
   }
   
+  if (options.hasMedia) {
+    query.$or = [
+      { hasImage: true },
+      { hasVideo: true },
+      { hasEmbed: true }
+    ];
+  }
+  
   return this.find(query).sort({ order: 1 });
+};
+
+// Static method to find media-rich lessons
+lessonSchema.statics.findMediaRich = function(options = {}) {
+  const query = {
+    $or: [
+      { hasImage: true },
+      { hasVideo: true },
+      { hasEmbed: true }
+    ]
+  };
+  
+  if (options.published !== undefined) {
+    query.isPublished = options.published;
+  }
+  
+  return this.find(query).sort({ createdAt: -1 });
 };
 
 // Static method to get next order number for a tutorial
@@ -492,6 +771,43 @@ lessonSchema.statics.cleanAllCorruptedContent = async function() {
     return { cleanedCount, totalLessons: lessons.length };
   } catch (error) {
     console.error('Error cleaning corrupted content:', error);
+    throw error;
+  }
+};
+
+// Static method to get media statistics
+lessonSchema.statics.getMediaStatistics = async function() {
+  try {
+    const stats = await this.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalLessons: { $sum: 1 },
+          lessonsWithImages: { $sum: { $cond: ['$hasImage', 1, 0] } },
+          lessonsWithVideos: { $sum: { $cond: ['$hasVideo', 1, 0] } },
+          lessonsWithEmbeds: { $sum: { $cond: ['$hasEmbed', 1, 0] } },
+          totalImages: { $sum: '$mediaSummary.images' },
+          totalVideos: { $sum: '$mediaSummary.videos' },
+          totalEmbeds: { $sum: '$mediaSummary.embeds' },
+          youtubeVideos: { $sum: '$mediaSummary.youtubeVideos' },
+          vimeoVideos: { $sum: '$mediaSummary.vimeoVideos' }
+        }
+      }
+    ]);
+    
+    return stats[0] || {
+      totalLessons: 0,
+      lessonsWithImages: 0,
+      lessonsWithVideos: 0,
+      lessonsWithEmbeds: 0,
+      totalImages: 0,
+      totalVideos: 0,
+      totalEmbeds: 0,
+      youtubeVideos: 0,
+      vimeoVideos: 0
+    };
+  } catch (error) {
+    console.error('Error getting media statistics:', error);
     throw error;
   }
 };

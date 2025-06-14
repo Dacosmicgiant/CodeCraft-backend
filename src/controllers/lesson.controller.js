@@ -2,6 +2,175 @@
 import Lesson from '../models/lesson.model.js';
 import Tutorial from '../models/tutorial.model.js';
 
+// Helper function to validate and extract YouTube video ID
+const validateYouTubeUrl = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/v\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/watch\?.*v=([a-zA-Z0-9_-]{11})/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      return {
+        videoId: match[1],
+        embedUrl: `https://www.youtube.com/embed/${match[1]}`,
+        thumbnailUrl: `https://img.youtube.com/vi/${match[1]}/maxresdefault.jpg`,
+        originalUrl: url
+      };
+    }
+  }
+  
+  return null;
+};
+
+// Helper function to validate image URLs
+const validateImageUrl = (url) => {
+  if (!url || typeof url !== 'string') return { isValid: false, message: 'URL is required' };
+  
+  try {
+    new URL(url);
+    
+    // Check for image file extensions
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico'];
+    const hasImageExtension = imageExtensions.some(ext => 
+      url.toLowerCase().includes(ext)
+    );
+    
+    // Check for known image hosting domains
+    const imageDomains = [
+      'imgur.com', 'i.imgur.com',
+      'unsplash.com', 'images.unsplash.com',
+      'pixabay.com', 'cdn.pixabay.com',
+      'pexels.com', 'images.pexels.com',
+      'githubusercontent.com', 'raw.githubusercontent.com',
+      'cloudinary.com', 'res.cloudinary.com',
+      'amazonaws.com', 's3.amazonaws.com',
+      'googleusercontent.com',
+      'cdn.jsdelivr.net',
+      'cdnjs.cloudflare.com',
+      'wikimedia.org',
+      'freepik.com',
+      'shutterstock.com'
+    ];
+    
+    const isFromImageDomain = imageDomains.some(domain => 
+      url.includes(domain)
+    );
+    
+    // Additional check for data URLs (base64 images)
+    const isDataUrl = url.startsWith('data:image/');
+    
+    return {
+      isValid: hasImageExtension || isFromImageDomain || isDataUrl,
+      hasExtension: hasImageExtension,
+      isFromTrustedDomain: isFromImageDomain,
+      isDataUrl: isDataUrl,
+      message: hasImageExtension || isFromImageDomain || isDataUrl
+        ? 'Valid image URL' 
+        : 'URL should point to an image file or be from a trusted image hosting service'
+    };
+  } catch (error) {
+    return {
+      isValid: false,
+      hasExtension: false,
+      isFromTrustedDomain: false,
+      isDataUrl: false,
+      message: 'Invalid URL format'
+    };
+  }
+};
+
+// Helper function to validate and process embed URLs
+const validateEmbedUrl = (url, service = null) => {
+  if (!url || typeof url !== 'string') return { isValid: false, message: 'URL is required' };
+  
+  try {
+    new URL(url);
+    
+    // YouTube
+    const youtubeData = validateYouTubeUrl(url);
+    if (youtubeData) {
+      return {
+        isValid: true,
+        service: 'youtube',
+        embedUrl: youtubeData.embedUrl,
+        thumbnailUrl: youtubeData.thumbnailUrl,
+        videoId: youtubeData.videoId,
+        originalUrl: url,
+        width: 560,
+        height: 315
+      };
+    }
+    
+    // Vimeo
+    const vimeoMatch = url.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+    if (vimeoMatch) {
+      return {
+        isValid: true,
+        service: 'vimeo',
+        embedUrl: `https://player.vimeo.com/video/${vimeoMatch[1]}`,
+        videoId: vimeoMatch[1],
+        originalUrl: url,
+        width: 640,
+        height: 360
+      };
+    }
+    
+    // CodePen
+    const codepenMatch = url.match(/codepen\.io\/([^\/]+)\/pen\/([^\/\?]+)/);
+    if (codepenMatch) {
+      return {
+        isValid: true,
+        service: 'codepen',
+        embedUrl: `https://codepen.io/${codepenMatch[1]}/embed/${codepenMatch[2]}`,
+        originalUrl: url,
+        width: 800,
+        height: 400
+      };
+    }
+    
+    // Generic iframe support for other services
+    const trustedDomains = [
+      'codesandbox.io',
+      'stackblitz.com',
+      'replit.com',
+      'jsfiddle.net',
+      'slides.com',
+      'docs.google.com',
+      'figma.com'
+    ];
+    
+    const domain = new URL(url).hostname;
+    const isTrustedDomain = trustedDomains.some(trusted => domain.includes(trusted));
+    
+    if (isTrustedDomain) {
+      return {
+        isValid: true,
+        service: 'iframe',
+        embedUrl: url,
+        originalUrl: url,
+        width: 800,
+        height: 600
+      };
+    }
+    
+    return {
+      isValid: false,
+      message: 'URL is not from a supported embed service'
+    };
+    
+  } catch (error) {
+    return {
+      isValid: false,
+      message: 'Invalid URL format'
+    };
+  }
+};
+
 // Helper function to validate and clean lesson content structure for EditorJS
 const validateAndCleanLessonContent = (content) => {
   if (!content || typeof content !== 'object') {
@@ -49,33 +218,106 @@ const validateAndCleanLessonContent = (content) => {
       block.data = {};
     }
     
-    // Validate specific block types
-    if (block.type === 'header') {
-      if (block.data.level && (block.data.level < 1 || block.data.level > 6)) {
-        block.data.level = 2; // Default to h2
-      }
-    }
-    
-    if (block.type === 'list') {
-      if (block.data.style) {
-        const validStyles = ['ordered', 'unordered', 'checklist'];
-        if (!validStyles.includes(block.data.style)) {
-          block.data.style = 'unordered'; // Default to unordered
-        }
-      }
-      
-      // Ensure items array exists
-      if (!Array.isArray(block.data.items)) {
-        block.data.items = [];
-      }
-    }
-    
-    // Add cleaned block
-    cleanBlocks.push({
+    // Process and validate specific block types
+    let processedBlock = {
       id: block.id || `block_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       type: block.type,
-      data: block.data
-    });
+      data: { ...block.data }
+    };
+    
+    // Handle different block types with enhanced validation
+    switch (block.type) {
+      case 'header':
+        if (block.data.level && (block.data.level < 1 || block.data.level > 6)) {
+          processedBlock.data.level = 2; // Default to h2
+        }
+        break;
+        
+      case 'list':
+        const validStyles = ['ordered', 'unordered', 'checklist'];
+        if (!validStyles.includes(block.data.style)) {
+          processedBlock.data.style = 'unordered';
+        }
+        if (!Array.isArray(block.data.items)) {
+          processedBlock.data.items = [];
+        }
+        break;
+        
+      case 'image':
+        if (block.data.url) {
+          const imageValidation = validateImageUrl(block.data.url);
+          if (imageValidation.isValid) {
+            processedBlock.data.url = block.data.url;
+            processedBlock.data.alt = block.data.alt || block.data.caption || '';
+            processedBlock.data.caption = block.data.caption || '';
+            processedBlock.data.stretched = block.data.stretched || false;
+            processedBlock.data.withBorder = block.data.withBorder || false;
+            processedBlock.data.withBackground = block.data.withBackground || false;
+          } else {
+            console.warn(`Invalid image URL in block ${i + 1}:`, imageValidation.message);
+            // Keep the block but mark it as invalid
+            processedBlock.data.invalid = true;
+            processedBlock.data.invalidReason = imageValidation.message;
+          }
+        }
+        break;
+        
+      case 'video':
+      case 'embed':
+        if (block.data.url || block.data.source) {
+          const url = block.data.url || block.data.source;
+          const embedValidation = validateEmbedUrl(url, block.data.service);
+          
+          if (embedValidation.isValid) {
+            processedBlock.data = {
+              ...processedBlock.data,
+              service: embedValidation.service,
+              url: embedValidation.originalUrl,
+              embed: embedValidation.embedUrl,
+              width: embedValidation.width || block.data.width || 560,
+              height: embedValidation.height || block.data.height || 315,
+              caption: block.data.caption || ''
+            };
+            
+            // Add YouTube-specific data
+            if (embedValidation.service === 'youtube') {
+              processedBlock.data.videoId = embedValidation.videoId;
+              processedBlock.data.thumbnail = embedValidation.thumbnailUrl;
+            }
+          } else {
+            console.warn(`Invalid embed URL in block ${i + 1}:`, embedValidation.message);
+            processedBlock.data.invalid = true;
+            processedBlock.data.invalidReason = embedValidation.message;
+          }
+        }
+        break;
+        
+      case 'code':
+        // Ensure code blocks have proper structure
+        processedBlock.data.code = block.data.code || '';
+        processedBlock.data.language = block.data.language || 'javascript';
+        break;
+        
+      case 'quote':
+        processedBlock.data.text = block.data.text || '';
+        processedBlock.data.caption = block.data.caption || '';
+        processedBlock.data.alignment = block.data.alignment || 'left';
+        break;
+        
+      case 'table':
+        if (!Array.isArray(block.data.content)) {
+          processedBlock.data.content = [['']];
+        }
+        processedBlock.data.withHeadings = block.data.withHeadings || false;
+        break;
+        
+      case 'warning':
+        processedBlock.data.title = block.data.title || 'Warning';
+        processedBlock.data.message = block.data.message || '';
+        break;
+    }
+    
+    cleanBlocks.push(processedBlock);
   }
   
   return { 
@@ -107,6 +349,52 @@ const checkDuplicateOrder = async (tutorialId, order, excludeLessonId = null) =>
 const sanitizeContent = (content) => {
   const validation = validateAndCleanLessonContent(content);
   return validation.cleanContent;
+};
+
+// @desc    Validate media URL
+// @route   POST /api/v1/lessons/validate-media
+// @access  Private/Admin
+export const validateMediaUrl = async (req, res) => {
+  try {
+    const { url, type } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        message: 'URL is required'
+      });
+    }
+    
+    let validation;
+    
+    switch (type) {
+      case 'image':
+        validation = validateImageUrl(url);
+        break;
+      case 'video':
+      case 'embed':
+        validation = validateEmbedUrl(url);
+        break;
+      default:
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid media type. Use "image", "video", or "embed"'
+        });
+    }
+    
+    res.json({
+      success: true,
+      message: validation.isValid ? 'URL is valid' : 'URL validation failed',
+      data: validation
+    });
+  } catch (error) {
+    console.error('Error in validateMediaUrl:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
 };
 
 // @desc    Create new lesson
@@ -778,6 +1066,9 @@ const generateHTMLFromLesson = (lesson) => {
         table { border-collapse: collapse; width: 100%; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
+        .embed-container { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; max-width: 100%; }
+        .embed-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        img { max-width: 100%; height: auto; }
     </style>
 </head>
 <body>
@@ -810,7 +1101,7 @@ const generateHTMLFromLesson = (lesson) => {
           html += `</${tag}>`;
           break;
         case 'code':
-          html += `<pre><code>${block.data?.code || ''}</code></pre>`;
+          html += `<pre><code class="language-${block.data?.language || 'javascript'}">${block.data?.code || ''}</code></pre>`;
           break;
         case 'quote':
           html += `<blockquote><p>${block.data?.text || ''}</p>`;
@@ -818,6 +1109,27 @@ const generateHTMLFromLesson = (lesson) => {
             html += `<cite>— ${block.data.caption}</cite>`;
           }
           html += `</blockquote>`;
+          break;
+        case 'image':
+          if (block.data?.url && !block.data?.invalid) {
+            html += `<figure>`;
+            html += `<img src="${block.data.url}" alt="${block.data?.alt || ''}" />`;
+            if (block.data?.caption) {
+              html += `<figcaption>${block.data.caption}</figcaption>`;
+            }
+            html += `</figure>`;
+          }
+          break;
+        case 'video':
+        case 'embed':
+          if (block.data?.embed && !block.data?.invalid) {
+            html += `<div class="embed-container">`;
+            html += `<iframe src="${block.data.embed}" frameborder="0" allowfullscreen></iframe>`;
+            html += `</div>`;
+            if (block.data?.caption) {
+              html += `<p><em>${block.data.caption}</em></p>`;
+            }
+          }
           break;
         case 'delimiter':
           html += `<hr>`;
@@ -880,7 +1192,7 @@ const generateTextFromLesson = (lesson) => {
           text += `\n`;
           break;
         case 'code':
-          text += `\`\`\`\n${block.data?.code || ''}\n\`\`\`\n\n`;
+          text += `\`\`\`${block.data?.language || ''}\n${block.data?.code || ''}\n\`\`\`\n\n`;
           break;
         case 'quote':
           text += `> ${block.data?.text || ''}\n`;
@@ -888,6 +1200,19 @@ const generateTextFromLesson = (lesson) => {
             text += `> — ${block.data.caption}\n`;
           }
           text += `\n`;
+          break;
+        case 'image':
+          if (block.data?.url && !block.data?.invalid) {
+            text += `[Image: ${block.data?.alt || block.data?.caption || 'Image'}]\n`;
+            text += `URL: ${block.data.url}\n\n`;
+          }
+          break;
+        case 'video':
+        case 'embed':
+          if (block.data?.url && !block.data?.invalid) {
+            text += `[${block.data?.service || 'Video'}: ${block.data?.caption || 'Embedded content'}]\n`;
+            text += `URL: ${block.data.url}\n\n`;
+          }
           break;
         case 'delimiter':
           text += `\n---\n\n`;
