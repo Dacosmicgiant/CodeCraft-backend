@@ -2,48 +2,90 @@
 import Lesson from '../models/lesson.model.js';
 import Tutorial from '../models/tutorial.model.js';
 
-// Helper function to validate lesson content structure for EditorJS
-const validateLessonContent = (content) => {
+// Helper function to validate and clean lesson content structure for EditorJS
+const validateAndCleanLessonContent = (content) => {
   if (!content || typeof content !== 'object') {
-    return { isValid: false, message: 'Content must be a valid object' };
+    return { 
+      isValid: true, 
+      cleanContent: {
+        time: Date.now(),
+        blocks: [],
+        version: "2.28.2"
+      }
+    };
   }
   
   if (!content.blocks || !Array.isArray(content.blocks)) {
-    return { isValid: false, message: 'Content must have a blocks array' };
+    return { 
+      isValid: true, 
+      cleanContent: {
+        time: content.time || Date.now(),
+        blocks: [],
+        version: content.version || "2.28.2"
+      }
+    };
   }
   
-  // Validate each block
+  // Clean and validate each block
+  const cleanBlocks = [];
+  
   for (let i = 0; i < content.blocks.length; i++) {
     const block = content.blocks[i];
     
+    // Skip undefined, null, or invalid blocks
+    if (!block || typeof block !== 'object') {
+      console.warn(`Skipping invalid block at index ${i}:`, block);
+      continue;
+    }
+    
     // Check if block has required properties
-    if (!block.type) {
-      return { isValid: false, message: `Block ${i + 1} is missing a type` };
+    if (!block.type || typeof block.type !== 'string') {
+      console.warn(`Block ${i + 1} has invalid or missing type, defaulting to 'paragraph':`, block);
+      block.type = 'paragraph';
+    }
+    
+    // Ensure block has data object
+    if (!block.data || typeof block.data !== 'object') {
+      block.data = {};
     }
     
     // Validate specific block types
     if (block.type === 'header') {
-      if (block.data && block.data.level && (block.data.level < 1 || block.data.level > 6)) {
-        return { isValid: false, message: `Block ${i + 1} (header): level must be between 1 and 6` };
+      if (block.data.level && (block.data.level < 1 || block.data.level > 6)) {
+        block.data.level = 2; // Default to h2
       }
     }
     
     if (block.type === 'list') {
-      if (block.data && block.data.style) {
+      if (block.data.style) {
         const validStyles = ['ordered', 'unordered', 'checklist'];
         if (!validStyles.includes(block.data.style)) {
-          return { isValid: false, message: `Block ${i + 1} (list): style must be 'ordered', 'unordered', or 'checklist'` };
+          block.data.style = 'unordered'; // Default to unordered
         }
+      }
+      
+      // Ensure items array exists
+      if (!Array.isArray(block.data.items)) {
+        block.data.items = [];
       }
     }
     
-    // Basic data object validation
-    if (block.data && typeof block.data !== 'object') {
-      return { isValid: false, message: `Block ${i + 1}: data must be an object` };
-    }
+    // Add cleaned block
+    cleanBlocks.push({
+      id: block.id || `block_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type: block.type,
+      data: block.data
+    });
   }
   
-  return { isValid: true };
+  return { 
+    isValid: true, 
+    cleanContent: {
+      time: content.time || Date.now(),
+      blocks: cleanBlocks,
+      version: content.version || "2.28.2"
+    }
+  };
 };
 
 // Helper function to check for duplicate orders
@@ -63,40 +105,8 @@ const checkDuplicateOrder = async (tutorialId, order, excludeLessonId = null) =>
 
 // Helper function to sanitize EditorJS content
 const sanitizeContent = (content) => {
-  if (!content || !content.blocks) {
-    return {
-      time: Date.now(),
-      blocks: [],
-      version: "2.28.2"
-    };
-  }
-  
-  // Ensure each block has required structure
-  const sanitizedBlocks = content.blocks.map(block => {
-    const sanitizedBlock = {
-      id: block.id || `block_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      type: block.type || 'paragraph',
-      data: block.data || {}
-    };
-    
-    // Handle specific block types
-    if (block.type === 'list' && block.data) {
-      // Ensure list has proper structure
-      sanitizedBlock.data = {
-        style: block.data.style || 'unordered',
-        items: block.data.items || [],
-        meta: block.data.meta || {}
-      };
-    }
-    
-    return sanitizedBlock;
-  });
-  
-  return {
-    time: content.time || Date.now(),
-    blocks: sanitizedBlocks,
-    version: content.version || "2.28.2"
-  };
+  const validation = validateAndCleanLessonContent(content);
+  return validation.cleanContent;
 };
 
 // @desc    Create new lesson
@@ -141,13 +151,6 @@ export const createLesson = async (req, res) => {
     
     // Sanitize and validate content
     const sanitizedContent = sanitizeContent(content);
-    const contentValidation = validateLessonContent(sanitizedContent);
-    if (!contentValidation.isValid) {
-      return res.status(400).json({ 
-        success: false,
-        message: contentValidation.message 
-      });
-    }
     
     // Check for duplicate order within the same tutorial
     const duplicateOrder = await checkDuplicateOrder(tutorialId, order);
@@ -251,11 +254,21 @@ export const getLessonsByTutorial = async (req, res) => {
       .populate('tutorial', 'title slug isPublished')
       .sort({ order: 1 });
     
+    // Clean lesson content before sending response
+    const cleanedLessons = lessons.map(lesson => {
+      const lessonObj = lesson.toObject();
+      if (lessonObj.content) {
+        const validation = validateAndCleanLessonContent(lessonObj.content);
+        lessonObj.content = validation.cleanContent;
+      }
+      return lessonObj;
+    });
+    
     res.json({
       success: true,
       message: 'Lessons retrieved successfully',
-      data: lessons,
-      total: lessons.length
+      data: cleanedLessons,
+      total: cleanedLessons.length
     });
   } catch (error) {
     console.error('Error in getLessonsByTutorial:', error);
@@ -310,10 +323,17 @@ export const getLessonById = async (req, res) => {
       });
     }
     
+    // Clean lesson content before sending response
+    const lessonObj = lesson.toObject();
+    if (lessonObj.content) {
+      const validation = validateAndCleanLessonContent(lessonObj.content);
+      lessonObj.content = validation.cleanContent;
+    }
+    
     res.json({
       success: true,
       message: 'Lesson retrieved successfully',
-      data: lesson
+      data: lessonObj
     });
   } catch (error) {
     console.error('Error in getLessonById:', error);
@@ -367,13 +387,6 @@ export const updateLesson = async (req, res) => {
     // Validate and sanitize content if being updated
     if (content !== undefined) {
       const sanitizedContent = sanitizeContent(content);
-      const contentValidation = validateLessonContent(sanitizedContent);
-      if (!contentValidation.isValid) {
-        return res.status(400).json({ 
-          success: false,
-          message: contentValidation.message 
-        });
-      }
       lesson.content = sanitizedContent;
     }
     
@@ -502,14 +515,6 @@ export const updateLessonContent = async (req, res) => {
     
     // Sanitize and validate content
     const sanitizedContent = sanitizeContent(content);
-    const contentValidation = validateLessonContent(sanitizedContent);
-    if (!contentValidation.isValid) {
-      return res.status(400).json({ 
-        success: false,
-        message: contentValidation.message 
-      });
-    }
-    
     lesson.content = sanitizedContent;
     const updatedLesson = await lesson.save();
     
@@ -550,12 +555,15 @@ export const duplicateLesson = async (req, res) => {
     
     const nextOrder = lastLesson ? lastLesson.order + 1 : 1;
     
+    // Clean the content before duplicating
+    const cleanContent = sanitizeContent(originalLesson.content);
+    
     // Create duplicate lesson
     const duplicateData = {
       title: `${originalLesson.title} (Copy)`,
       order: nextOrder,
       tutorial: originalLesson.tutorial._id,
-      content: originalLesson.content,
+      content: cleanContent,
       duration: originalLesson.duration,
       isPublished: false // Always create copies as drafts
     };
@@ -615,10 +623,20 @@ export const getAllLessons = async (req, res) => {
       .limit(limit * 1)
       .skip((page - 1) * limit);
     
+    // Clean lesson content before sending response
+    const cleanedLessons = lessons.map(lesson => {
+      const lessonObj = lesson.toObject();
+      if (lessonObj.content) {
+        const validation = validateAndCleanLessonContent(lessonObj.content);
+        lessonObj.content = validation.cleanContent;
+      }
+      return lessonObj;
+    });
+    
     res.json({
       success: true,
       message: 'Lessons retrieved successfully',
-      data: lessons,
+      data: cleanedLessons,
       pagination: {
         total,
         page: parseInt(page),
@@ -693,6 +711,9 @@ export const exportLesson = async (req, res) => {
       });
     }
     
+    // Clean content before export
+    const cleanContent = sanitizeContent(lesson.content);
+    
     let exportData;
     
     switch (format) {
@@ -701,7 +722,7 @@ export const exportLesson = async (req, res) => {
           title: lesson.title,
           order: lesson.order,
           duration: lesson.duration,
-          content: lesson.content,
+          content: cleanContent,
           tutorial: lesson.tutorial.title,
           isPublished: lesson.isPublished,
           createdAt: lesson.createdAt,
@@ -710,11 +731,13 @@ export const exportLesson = async (req, res) => {
         break;
         
       case 'html':
-        exportData = generateHTMLFromLesson(lesson);
+        const lessonWithCleanContent = { ...lesson.toObject(), content: cleanContent };
+        exportData = generateHTMLFromLesson(lessonWithCleanContent);
         break;
         
       case 'text':
-        exportData = generateTextFromLesson(lesson);
+        const lessonWithCleanContentText = { ...lesson.toObject(), content: cleanContent };
+        exportData = generateTextFromLesson(lessonWithCleanContentText);
         break;
         
       default:
@@ -766,30 +789,32 @@ const generateHTMLFromLesson = (lesson) => {
 
   if (lesson.content && lesson.content.blocks) {
     lesson.content.blocks.forEach(block => {
+      if (!block || !block.type) return; // Skip invalid blocks
+      
       switch (block.type) {
         case 'header':
-          html += `<h${block.data.level || 2}>${block.data.text || ''}</h${block.data.level || 2}>`;
+          html += `<h${block.data?.level || 2}>${block.data?.text || ''}</h${block.data?.level || 2}>`;
           break;
         case 'paragraph':
-          html += `<p>${block.data.text || ''}</p>`;
+          html += `<p>${block.data?.text || ''}</p>`;
           break;
         case 'list':
-          const tag = block.data.style === 'ordered' ? 'ol' : 'ul';
+          const tag = block.data?.style === 'ordered' ? 'ol' : 'ul';
           html += `<${tag}>`;
-          if (block.data.items) {
+          if (block.data?.items) {
             block.data.items.forEach(item => {
-              const content = typeof item === 'string' ? item : item.content || '';
+              const content = typeof item === 'string' ? item : item?.content || '';
               html += `<li>${content}</li>`;
             });
           }
           html += `</${tag}>`;
           break;
         case 'code':
-          html += `<pre><code>${block.data.code || ''}</code></pre>`;
+          html += `<pre><code>${block.data?.code || ''}</code></pre>`;
           break;
         case 'quote':
-          html += `<blockquote><p>${block.data.text || ''}</p>`;
-          if (block.data.caption) {
+          html += `<blockquote><p>${block.data?.text || ''}</p>`;
+          if (block.data?.caption) {
             html += `<cite>— ${block.data.caption}</cite>`;
           }
           html += `</blockquote>`;
@@ -798,12 +823,12 @@ const generateHTMLFromLesson = (lesson) => {
           html += `<hr>`;
           break;
         case 'table':
-          if (block.data.content) {
+          if (block.data?.content) {
             html += `<table>`;
             block.data.content.forEach((row, index) => {
               html += `<tr>`;
               row.forEach(cell => {
-                const tag = block.data.withHeadings && index === 0 ? 'th' : 'td';
+                const tag = block.data?.withHeadings && index === 0 ? 'th' : 'td';
                 html += `<${tag}>${cell}</${tag}>`;
               });
               html += `</tr>`;
@@ -834,30 +859,32 @@ const generateTextFromLesson = (lesson) => {
 
   if (lesson.content && lesson.content.blocks) {
     lesson.content.blocks.forEach(block => {
+      if (!block || !block.type) return; // Skip invalid blocks
+      
       switch (block.type) {
         case 'header':
-          const level = block.data.level || 2;
-          text += `\n${'#'.repeat(level)} ${block.data.text || ''}\n\n`;
+          const level = block.data?.level || 2;
+          text += `\n${'#'.repeat(level)} ${block.data?.text || ''}\n\n`;
           break;
         case 'paragraph':
-          text += `${block.data.text || ''}\n\n`;
+          text += `${block.data?.text || ''}\n\n`;
           break;
         case 'list':
-          if (block.data.items) {
+          if (block.data?.items) {
             block.data.items.forEach((item, index) => {
-              const content = typeof item === 'string' ? item : item.content || '';
-              const prefix = block.data.style === 'ordered' ? `${index + 1}. ` : '• ';
+              const content = typeof item === 'string' ? item : item?.content || '';
+              const prefix = block.data?.style === 'ordered' ? `${index + 1}. ` : '• ';
               text += `${prefix}${content}\n`;
             });
           }
           text += `\n`;
           break;
         case 'code':
-          text += `\`\`\`\n${block.data.code || ''}\n\`\`\`\n\n`;
+          text += `\`\`\`\n${block.data?.code || ''}\n\`\`\`\n\n`;
           break;
         case 'quote':
-          text += `> ${block.data.text || ''}\n`;
-          if (block.data.caption) {
+          text += `> ${block.data?.text || ''}\n`;
+          if (block.data?.caption) {
             text += `> — ${block.data.caption}\n`;
           }
           text += `\n`;
