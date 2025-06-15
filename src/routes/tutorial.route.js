@@ -6,14 +6,14 @@ import {
   updateTutorial,
   deleteTutorial
 } from '../controllers/tutorial.controller.js';
-import { protect, admin } from '../middleware/auth.middleware.js';
+import { protect, admin, optionalAuth } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
-// Apply protect middleware to GET routes to check for authentication
-// This way, admin users can see unpublished content
-router.get('/', protect, getTutorials);
-router.get('/:id', protect, getTutorialById);
+// PUBLIC routes with optional auth - allows browsing without login
+// Admin users will still see unpublished content due to controller logic
+router.get('/', optionalAuth, getTutorials);
+router.get('/:id', optionalAuth, getTutorialById);
 
 // Admin-only routes
 router.post('/', protect, admin, createTutorial);
