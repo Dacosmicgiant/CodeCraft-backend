@@ -1,4 +1,4 @@
-// src/index.js - Simple CORS (No Cookies)
+// src/index.js - Updated CORS Configuration
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
@@ -25,17 +25,44 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Simple CORS configuration
+// CORS configuration
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.FRONTEND_URL,
+  'https://code-craft-frontend-4wg4xt2dc-thecosmicgiants-projects.vercel.app', // Your current Vercel URL
+  'https://codecraft-frontend-uj45.onrender.com', // Your old Render URL
+];
+
+// Add any additional origins from environment variable
+if (process.env.ALLOWED_ORIGINS) {
+  const additionalOrigins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
+  allowedOrigins.push(...additionalOrigins);
+}
+
+// Remove undefined/null values
+const cleanOrigins = allowedOrigins.filter(Boolean);
+
+console.log('🌍 Allowed CORS origins:', cleanOrigins);
+
 const corsOptions = {
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'https://your-app.vercel.app', // Replace with your Vercel URL
-    process.env.FRONTEND_URL
-  ].filter(Boolean), // Remove undefined values
-  credentials: false, // No cookies needed
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (cleanOrigins.indexOf(origin) !== -1) {
+      console.log(`✅ CORS allowed for origin: ${origin}`);
+      callback(null, true);
+    } else {
+      console.log(`❌ CORS blocked for origin: ${origin}`);
+      console.log(`🔍 Allowed origins: ${cleanOrigins.join(', ')}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: false, // No cookies needed for JWT
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200 // For legacy browser support
 };
 
 app.use(cors(corsOptions));
@@ -49,9 +76,22 @@ app.use('/api/v1/tutorials', tutorialRoutes);
 app.use('/api/v1/lessons', lessonRoutes);
 app.use('/api/v1/tutorials/:tutorialId/lessons', tutorialLessonRoutes);
 
-// Base route
+// Health check route
 app.get('/', (req, res) => {
-  res.send('API is running...');
+  res.json({
+    message: 'API is running...',
+    cors_origins: cleanOrigins,
+    environment: process.env.NODE_ENV
+  });
+});
+
+// CORS test route
+app.get('/api/v1/cors-test', (req, res) => {
+  res.json({
+    message: 'CORS is working!',
+    origin: req.headers.origin,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Error handling middleware
@@ -70,4 +110,5 @@ const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
+  console.log(`CORS Origins: ${cleanOrigins.join(', ')}`);
 });
