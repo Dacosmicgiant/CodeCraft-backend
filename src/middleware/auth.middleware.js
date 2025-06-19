@@ -1,3 +1,4 @@
+// src/middleware/auth.middleware.js - Compatible with current backend
 import jwt from 'jsonwebtoken';
 import User from '../models/user.model.js';
 
@@ -7,15 +8,18 @@ export const protect = async (req, res, next) => {
   let token;
 
   try {
-    // Check for token in cookies, headers, or query params
+    // Check for token in cookies first (your current setup), then headers
     if (req.cookies.token) {
       token = req.cookies.token;
+      console.log('🍪 Found token in cookies');
     } else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
+      console.log('📋 Found token in headers');
     }
 
     // Make sure token exists
     if (!token) {
+      console.log('❌ No token found in cookies or headers');
       return res.status(401).json({ 
         success: false,
         message: 'Not authorized, no token provided' 
@@ -24,19 +28,16 @@ export const protect = async (req, res, next) => {
 
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Debug logging (remove in production)
-    console.log('Decoded token:', decoded);
+    console.log('🔓 Token decoded successfully:', decoded.id);
 
     // Find user by id from token (excluding password)
     const user = await User.findById(decoded.id).select('-password');
     
-    // Debug logging (remove in production) 
-    console.log('Found user:', user ? 'User exists' : 'User not found');
+    console.log('👤 User lookup result:', user ? 'User found' : 'User not found');
 
     // Check if user still exists
     if (!user) {
-      console.log('User not found for ID:', decoded.id);
+      console.log('❌ User not found for ID:', decoded.id);
       return res.status(401).json({ 
         success: false,
         message: 'User not found, token invalid' 
@@ -45,10 +46,11 @@ export const protect = async (req, res, next) => {
 
     // Add user to request object
     req.user = user;
+    console.log('✅ User authenticated:', user.username || user.email);
     next();
 
   } catch (error) {
-    console.error('Auth middleware error:', error);
+    console.error('❌ Auth middleware error:', error.message);
     
     // Handle specific JWT errors
     if (error.name === 'JsonWebTokenError') {
