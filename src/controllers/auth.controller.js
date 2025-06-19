@@ -1,3 +1,4 @@
+// src/controllers/auth.controller.js - Simple JWT (No Cookies)
 import jwt from 'jsonwebtoken';
 import User from '../models/user.model.js';
 
@@ -38,19 +39,13 @@ export const registerUser = async (req, res) => {
       // Generate token
       const token = generateToken(user._id);
 
-      // Set HTTP-only cookie
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      });
-
-      // Return user data
+      // Return user data WITH token
       res.status(201).json({
         _id: user._id,
         username: user.username,
         email: user.email,
         role: user.role,
+        token: token, // Include token in response
       });
     } else {
       res.status(400).json({ message: 'Invalid user data' });
@@ -76,19 +71,13 @@ export const loginUser = async (req, res) => {
       // Generate token
       const token = generateToken(user._id);
 
-      // Set HTTP-only cookie
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      });
-
-      // Return user data
+      // Return user data WITH token
       res.json({
         _id: user._id,
         username: user.username,
         email: user.email,
         role: user.role,
+        token: token, // Include token in response
       });
     } else {
       res.status(401).json({ message: 'Invalid email or password' });
@@ -99,14 +88,11 @@ export const loginUser = async (req, res) => {
   }
 };
 
-// @desc    Logout user / clear cookie
-// @route   GET /api/v1/auth/logout
-// @access  Private
+// @desc    Logout user (client-side only with JWT)
+// @route   POST /api/v1/auth/logout  
+// @access  Public
 export const logoutUser = (req, res) => {
-  res.cookie('token', '', {
-    httpOnly: true,
-    expires: new Date(0),
-  });
+  // With JWT, logout is handled client-side by removing the token
   res.status(200).json({ message: 'Logged out successfully' });
 };
 

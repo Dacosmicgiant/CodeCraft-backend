@@ -1,4 +1,4 @@
-// src/middleware/auth.middleware.js - Compatible with current backend
+// src/middleware/auth.middleware.js - Simple JWT with Headers
 import jwt from 'jsonwebtoken';
 import User from '../models/user.model.js';
 
@@ -8,18 +8,15 @@ export const protect = async (req, res, next) => {
   let token;
 
   try {
-    // Check for token in cookies first (your current setup), then headers
-    if (req.cookies.token) {
-      token = req.cookies.token;
-      console.log('🍪 Found token in cookies');
-    } else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    // Check for token in Authorization header
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
-      console.log('📋 Found token in headers');
+      console.log('🔑 Token found in Authorization header');
     }
 
     // Make sure token exists
     if (!token) {
-      console.log('❌ No token found in cookies or headers');
+      console.log('❌ No token found in Authorization header');
       return res.status(401).json({ 
         success: false,
         message: 'Not authorized, no token provided' 
@@ -28,7 +25,7 @@ export const protect = async (req, res, next) => {
 
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('🔓 Token decoded successfully:', decoded.id);
+    console.log('🔓 Token decoded successfully for user:', decoded.id);
 
     // Find user by id from token (excluding password)
     const user = await User.findById(decoded.id).select('-password');
@@ -91,10 +88,8 @@ export const optionalAuth = async (req, res, next) => {
   let token;
 
   try {
-    // Check for token in cookies or headers
-    if (req.cookies.token) {
-      token = req.cookies.token;
-    } else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    // Check for token in Authorization header
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     }
 
@@ -120,18 +115,5 @@ export const optionalAuth = async (req, res, next) => {
     // If token is invalid, continue without setting req.user
     console.log('Optional auth failed:', error.message);
     next();
-  }
-};
-
-// @desc    Check if user owns resource or is admin
-// @access  Private routes
-export const ownerOrAdmin = (req, res, next) => {
-  if (req.user && (req.user._id.toString() === req.params.userId || req.user.role === 'admin')) {
-    next();
-  } else {
-    return res.status(403).json({ 
-      success: false,
-      message: 'Not authorized to access this resource' 
-    });
   }
 };

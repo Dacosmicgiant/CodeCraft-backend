@@ -1,6 +1,7 @@
+// src/index.js - Simple CORS (No Cookies)
 import express from 'express';
 import dotenv from 'dotenv';
-import cookieParser from 'cookie-parser';
+import cors from 'cors';
 import connectDB from './lib/db.js';
 
 // Import routes
@@ -23,30 +24,21 @@ const app = express();
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
-// Enhanced CORS middleware to handle preflight requests
-app.use((req, res, next) => {
-  const allowedOrigins = [process.env.FRONTEND_URL || 'http://localhost:5173'];
-  const origin = req.headers.origin;
-  
-  // Check if the request origin is in our allowed origins
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  
-  // Set other CORS headers
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  
-  next();
-});
+// Simple CORS configuration
+const corsOptions = {
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://your-app.vercel.app', // Replace with your Vercel URL
+    process.env.FRONTEND_URL
+  ].filter(Boolean), // Remove undefined values
+  credentials: false, // No cookies needed
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
 
 // Routes
 app.use('/api/v1/auth', authRoutes);
@@ -77,4 +69,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV}`);
 });
